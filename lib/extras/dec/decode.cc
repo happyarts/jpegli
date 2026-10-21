@@ -46,6 +46,24 @@ std::string GetExtension(const std::string& path) {
   return "";
 }
 
+// SOI, optional fill bytes, then any marker that may follow SOI: a
+// non-differential frame header (SOF0-3, SOF9-11), DHP, a table (DHT, DAC,
+// DQT), DRI, an application segment or a comment.
+bool IsJpeg(const Span<const uint8_t>& bytes) {
+  if (bytes.size() < 3 || bytes[0] != 0xFF || bytes[1] != 0xD8 ||
+      bytes[2] != 0xFF) {
+    return false;
+  }
+  size_t pos = 3;
+  while (pos < bytes.size() && bytes[pos] == 0xFF) ++pos;
+  if (pos == bytes.size()) return false;
+  const uint8_t marker = bytes[pos];
+  return (marker >= 0xC0 && marker <= 0xC4) ||
+         (marker >= 0xC9 && marker <= 0xCC) || marker == 0xDB ||
+         marker == 0xDD || marker == 0xDE ||
+         (marker >= 0xE0 && marker <= 0xEF) || marker == 0xFE;
+}
+
 }  // namespace
 
 Codec CodecFromPath(const std::string& path,
@@ -205,13 +223,6 @@ Codec DetectCodec(const Span<const uint8_t>& bytes) {
        {'P', '7'},
        {'P', 'F'},
        {'P', 'f'}}};
-  static const std::array<std::array<uint8_t, 4>, 5> kJpgSignatures = {{
-      {0xFF, 0xD8, 0xFF, 0xDB},
-      {0xFF, 0xD8, 0xFF, 0xE0},
-      {0xFF, 0xD8, 0xFF, 0xE1},
-      {0xFF, 0xD8, 0xFF, 0xE2},
-      {0xFF, 0xD8, 0xFF, 0xEE},
-  }};
   static const std::array<std::array<uint8_t, 9>, 1> kJxlBoxSignatures = {{
       {0x00, 0x00, 0x00, 0x0C, 'J', 'X', 'L', ' ', 0x0D},
   }};
@@ -221,7 +232,7 @@ Codec DetectCodec(const Span<const uint8_t>& bytes) {
 
   if (CheckSignatures(bytes, kExrSignatures)) return Codec::kEXR;
   if (CheckSignatures(bytes, kGifSignatures)) return Codec::kGIF;
-  if (CheckSignatures(bytes, kJpgSignatures)) return Codec::kJPG;
+  if (IsJpeg(bytes)) return Codec::kJPG;
   if (CheckSignatures(bytes, kJxlBoxSignatures)) return Codec::kJXL;
   if (CheckSignatures(bytes, kJxlSignatures)) return Codec::kJXL;
   if (CheckSignatures(bytes, kPgxSignatures)) return Codec::kPGX;
